@@ -1,101 +1,218 @@
 import React, { useEffect, useState } from "react";
-import { TonConnectUI, THEME } from "@tonconnect/ui";
+import { TonConnectUI } from "@tonconnect/ui";
 import type { ConnectedWallet } from "@tonconnect/ui";
+
+/**
+ * SIDE NOTE:
+ * - Backend logic is USDT-only
+ * - UI can show NGN or USDT
+ * - 1 USDT = 5 coins (DO NOT CHANGE)
+ */
+
+const COIN_RATE = 5; // 1 USDT = 5 coins
 
 export const Wallet: React.FC = () => {
   const [tc, setTc] = useState<TonConnectUI | null>(null);
-  const [walletAddress, setWalletAddress] = useState<string>("");
-  const [tonAmount, setTonAmount] = useState<number>(1);
-  const [coinBalance, setCoinBalance] = useState<number>(0);
+  const [walletAddress, setWalletAddress] = useState("");
+  const [connected, setConnected] = useState(false);
 
-  const RATE = 5;
+  // ===== Currency & Amount =====
+  const [currency, setCurrency] = useState<"USDT" | "NGN">("USDT");
+  const [amount, setAmount] = useState("");
+  const [usdtPrice, setUsdtPrice] = useState(1500); // default fallback
+  const [email, setEmail] = useState("");
 
+  // ===== UI Feedback =====
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  /* =========================
+     INIT TON CONNECT
+  ========================= */
   useEffect(() => {
-    const ton = new TonConnectUI({
-manifestUrl: `${window.location.origin}/tonconnect-manifest.json`,
-  buttonRootId: "ton-connect",
-  uiPreferences: {
-    theme: THEME.LIGHT
-  }
-});
+    const ui = new TonConnectUI({
+      manifestUrl: "/tonconnect-manifest.json",
+    });
 
-    setTc(ton);
+    setTc(ui);
 
-    ton.onStatusChange((status: ConnectedWallet | null) => {
-      if (status) setWalletAddress(status.account.address);
-      else setWalletAddress("");
+    ui.onStatusChange((wallet: ConnectedWallet | null) => {
+      if (wallet) {
+        setConnected(true);
+        setWalletAddress(wallet.account.address);
+      } else {
+        setConnected(false);
+        setWalletAddress("");
+      }
     });
   }, []);
 
-  const createOrder = async () => {
-    if (!walletAddress) return alert("Connect wallet first");
-    if (tonAmount <= 0) return alert("Enter a valid TON amount");
+  /* =========================
+     FETCH USDT PRICE (NGN)
+     SIDE NOTE:
+     - You may later replace this with CoinGecko / Binance
+  ========================= */
+  useEffect(() => {
+    fetch("https://api.exchangerate-api.com/v4/latest/USD")
+      .then(res => res.json())
+      .then(data => {
+        // Assuming 1 USDT ≈ 1 USD
+        setUsdtPrice(Math.round(data.rates.NGN));
+      })
+      .catch(() => {
+        setUsdtPrice(1500); // safe fallback
+      });
+  }, []);
 
-    const order = await fetch("https://tonwallet-rrab.onrender.com/create-order", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ wallet: walletAddress, tonAmount }),
-    }).then((r) => r.json());
+  /* =========================
+     NORMALIZATION (USDT-ONLY)
+  ========================= */
+  const usdtAmount =
+    currency === "USDT"
+      ? Number(amount)
+      : Number(amount) / usdtPrice;
 
-    alert("Order created: " + order.orderId);
+  const nairaEquivalent = usdtAmount * usdtPrice;
+  const coinEquivalent = usdtAmount * COIN_RATE;
 
-    if (!tc) return;
+  /* =========================
+     TON PAYMENT
+  ========================= */
+  const payWithTon = async () => {
+    if (!tc || !usdtAmount || !walletAddress) return;
 
-    await tc.sendTransaction({
-      validUntil: Date.now() + 60000,
-      messages: [
-        {
-          address: order.payTo,
-          amount: (tonAmount * 1e9).toString(),
-          payload: order.memo,
-        },
-      ],
-    });
+    setLoading(true);
+    setMessage("");
 
-    alert("Transaction sent!");
-    setCoinBalance((prev) => prev + tonAmount * RATE);
+    try {
+      const res = await fetch("https://tonwallet-rrab.onrender.com/api/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet: walletAddress,
+          tonAmount: usdtAmount,
+        }),
+      });
+
+      const data = await res.json();
+
+      await tc.sendTransaction({
+        validUntil: Math.floor(Date.now() / 1000) + 300,
+        messages: [
+          {
+            address: data.payTo,
+            amount: String(Math.floor(usdtAmount * 1e9)),
+            payload: data.memo,
+          },
+        ],
+      });
+
+      setMessage("Transaction sent. Awaiting confirmation...");
+    } catch (err) {
+      setMessage("Transaction failed");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const confirmOrder = async () => {
-    const orderId = prompt("Enter your Order ID:");
-    if (!orderId) return;
+  /* =========================
+     PAYSTACK PAYMENT (NO WALLET REQUIRED)
+  ========================= */
+  const payWithPaystack = async () => {
+    if (!email || !amount) return;
 
-    const result = await fetch("https://tonwallet-rrab.onrender.com/confirm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderId }),
-    }).then((r) => r.json());
+    setLoading(true);
+    setMessage("");
 
-    alert(JSON.stringify(result));
+    try {
+      const res = await fetch("https://tonwallet-rrab.onrender.com/api/paystack/init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          nairaAmount: Math.round(nairaEquivalent),
+          usdtAmount,
+          usdtRate: usdtPrice, // LOCK RATE
+        }),
+      });
+
+      const data = await res.json();
+
+      window.location.href = `https://checkout.paystack.com/${data.reference}`;
+    } catch {
+      setMessage("Paystack initialization failed");
+    } finally {
+      setLoading(false);
+    }
   };
 
+  /* =========================
+     UI
+  ========================= */
   return (
-    <div className="container">
-      <h1>TON Coin Converter</h1>
+    <div style={{
+    maxWidth: 420,
+    margin: "auto",
+    background: "#f9fafb",
+    padding: 20,
+    borderRadius: 12,
+  }}>
+      <h2>Wallet & Payment</h2>
 
-      {/* ✅ CONNECT WALLET BUTTON APPEARS HERE */}
-      <div id="ton-connect" style={{ marginBottom: "15px" }} />
+      {/* Currency Selector */}
+      <label>Currency</label>
+      <select
+        value={currency}
+        onChange={e => setCurrency(e.target.value as any)}
+      >
+        <option value="USDT">USDT</option>
+        <option value="NGN">NGN</option>
+      </select>
 
-      <p>Connected wallet: {walletAddress || "Not connected"}</p>
-
-      <label>Enter TON amount:</label>
+      {/* Amount */}
+      <label>Amount ({currency})</label>
       <input
         type="number"
-        value={tonAmount}
-        onChange={(e) => setTonAmount(Number(e.target.value))}
-        min={0}
-        step={0.01}
+        value={amount}
+        onChange={e => setAmount(e.target.value)}
       />
 
-      <button onClick={createOrder} className="buy">
-        Buy {tonAmount} TON → {tonAmount * RATE} Coins
+      {/* Breakdown */}
+      <div style={{ fontSize: 14, marginTop: 8 }}>
+        <p>USDT: {usdtAmount.toFixed(4)}</p>
+        <p>NGN: ₦{Math.round(nairaEquivalent)}</p>
+        <p>Coins: {coinEquivalent.toFixed(2)}</p>
+      </div>
+
+      {/* TON WALLET */}
+      {connected ? (
+        <button disabled={loading} onClick={payWithTon}>
+          Pay with TON Wallet
+        </button>
+      ) : (
+        <button onClick={() => tc?.connectWallet()}>
+          Connect TON Wallet
+        </button>
+      )}
+
+      <hr />
+
+      {/* PAYSTACK */}
+      <label>Email (Paystack)</label>
+      <input
+        type="email"
+        value={email}
+        onChange={e => setEmail(e.target.value)}
+      />
+
+      <button disabled={loading} onClick={payWithPaystack}>
+        Pay with Paystack
       </button>
 
-      <button onClick={confirmOrder} className="confirm">
-        Confirm Payment
-      </button>
-
-      <p>Your Coin Balance: {coinBalance}</p>
+      {/* STATUS */}
+      {message && <p>{message}</p>}
     </div>
   );
 };
+
+export default Wallet;
