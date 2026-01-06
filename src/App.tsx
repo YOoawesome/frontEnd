@@ -1,4 +1,5 @@
-import { Wallet } from "./component/Wallet";
+import Wallet from "./component/Wallet";
+
 
 function App() {
   return (
