@@ -1,7 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import path from "path";
 
 export default defineConfig({
+  base: "./", // required for Hostinger
   plugins: [react()],
-  base: "./", // ✅ REQUIRED for Hostinger subfolders
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
+  },
 });

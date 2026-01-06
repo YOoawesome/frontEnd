@@ -25,6 +25,8 @@ const Wallet: React.FC = () => {
   const [message, setMessage] = useState("");
   const [walletWarning, setWalletWarning] = useState("");
 
+  const [paystackReference, setPaystackReference] = useState<string | null>(null);
+
   // ===== INIT TON CONNECT =====
   useEffect(() => {
     const ui = new TonConnectUI({
@@ -55,19 +57,19 @@ const Wallet: React.FC = () => {
   }, []);
 
   // ===== FETCH WALLET BALANCE (PERSISTENT) =====
-  useEffect(() => {
+  const fetchWalletBalance = () => {
     if (!walletAddress) return;
 
-    fetch(
-      `https://tonwallet-rrab.onrender.com/api/wallet-balance?wallet=${walletAddress}`
-    )
+    fetch(`https://tonwallet-rrab.onrender.com/api/balance/${walletAddress}`)
       .then((res) => res.json())
       .then((data) => {
-        setWalletBalance(Number(data.balance) || 0);
+        setWalletBalance(Number(data.usdt_balance) || 0);
       })
-      .catch(() => {
-        setWalletBalance(0);
-      });
+      .catch(() => setWalletBalance(0));
+  };
+
+  useEffect(() => {
+    fetchWalletBalance();
   }, [walletAddress]);
 
   const usdtAmount =
@@ -90,7 +92,7 @@ const Wallet: React.FC = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             wallet: walletAddress,
-            usdtAmount,
+            tonAmount: usdtAmount,
           }),
         }
       );
@@ -135,7 +137,7 @@ const Wallet: React.FC = () => {
   };
 
   // ===== PAYSTACK =====
-  const payWithPaystack = async () => {
+  const handlePaystackPayment = async () => {
     if (!email || !amount) return;
 
     setLoading(true);
@@ -151,20 +153,67 @@ const Wallet: React.FC = () => {
             email,
             nairaAmount: Math.round(nairaEquivalent),
             usdtAmount,
-            usdtRate: usdtPrice,
-            wallet: walletAddress,
           }),
         }
       );
 
       const data = await res.json();
-      window.location.href = `https://checkout.paystack.com/${data.reference}`;
+      setPaystackReference(data.reference);
+
+      // Open Paystack checkout in new window
+      window.open(data.authorization_url, "_blank");
     } catch {
       setMessage("Paystack initialization failed");
     } finally {
       setLoading(false);
     }
   };
+
+  // ===== AUTO CONFIRM PAYSTACK PAYMENT =====
+  useEffect(() => {
+    if (!paystackReference || !walletAddress) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(
+          "https://tonwallet-rrab.onrender.com/api/confirm",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ orderId: paystackReference }),
+          }
+        );
+        const data = await res.json();
+
+        if (data.status === "paid") {
+          setMessage("Paystack payment confirmed!");
+          setPaystackReference(null);
+          fetchWalletBalance();
+          clearInterval(interval);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [paystackReference, walletAddress]);
+
+  // ===== LISTEN FOR PAYSTACK CALLBACK =====
+  useEffect(() => {
+    const handleCallback = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const reference = params.get("reference");
+
+      if (reference && walletAddress) {
+        setPaystackReference(reference);
+        // Optionally remove reference from URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    };
+
+    handleCallback();
+  }, [walletAddress]);
 
   return (
     <div
@@ -227,11 +276,24 @@ const Wallet: React.FC = () => {
       </div>
 
       {connected ? (
-        <button disabled={loading} onClick={payWithTon}>
+        <button
+          disabled={loading}
+          onClick={payWithTon}
+          style={{ cursor: "pointer" }}
+          onMouseOver={(e) => (e.currentTarget.style.background = "#3b82f6")}
+          onMouseOut={(e) => (e.currentTarget.style.background = "")}
+        >
           Pay with TON Wallet
         </button>
       ) : (
-        <button onClick={connectTonWallet}>Connect TON Wallet</button>
+        <button
+          onClick={connectTonWallet}
+          style={{ cursor: "pointer" }}
+          onMouseOver={(e) => (e.currentTarget.style.background = "#3b82f6")}
+          onMouseOut={(e) => (e.currentTarget.style.background = "")}
+        >
+          Connect TON Wallet
+        </button>
       )}
 
       {walletWarning && (
@@ -247,7 +309,13 @@ const Wallet: React.FC = () => {
         onChange={(e) => setEmail(e.target.value)}
       />
 
-      <button disabled={loading} onClick={payWithPaystack}>
+      <button
+        disabled={loading}
+        onClick={handlePaystackPayment}
+        style={{ cursor: "pointer" }}
+        onMouseOver={(e) => (e.currentTarget.style.background = "#3b82f6")}
+        onMouseOut={(e) => (e.currentTarget.style.background = "")}
+      >
         Pay with Paystack
       </button>
 
