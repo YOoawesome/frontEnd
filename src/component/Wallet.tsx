@@ -7,6 +7,7 @@ import type { ConnectedWallet } from "@tonconnect/ui";
  * - Backend logic is USDT-only
  * - UI can show NGN or USDT
  * - Wallet balance is recorded server-side and persists after refresh
+ * - Paystack inline modal avoids fullscreen warnings
  */
 
 const Wallet: React.FC = () => {
@@ -23,6 +24,44 @@ const Wallet: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [walletWarning, setWalletWarning] = useState("");
+
+  // ===== Paystack modal state =====
+  const [showPaystackModal, setShowPaystackModal] = useState(false);
+  const [paystackUrl, setPaystackUrl] = useState("");
+
+  // ===== Validation errors =====
+  const [errors, setErrors] = useState({ email: "", amount: "" });
+  const [isPaystackReady, setIsPaystackReady] = useState(false);
+
+  const validatePayment = () => {
+    let newErrors = { email: "", amount: "" };
+    const emailRegex = /\S+@\S+\.\S+/;
+
+    if (!email) {
+      newErrors.email = "Email is required";
+    } else if (!emailRegex.test(email)) {
+      newErrors.email = "Invalid email address";
+    }
+
+    if (!amount) {
+      newErrors.amount = "Amount is required";
+    } else if (Number(amount) <= 0) {
+      newErrors.amount = "Amount must be a positive number";
+    }
+
+    setErrors(newErrors);
+    return !newErrors.email && !newErrors.amount;
+  };
+
+  useEffect(() => {
+    const emailValid = /\S+@\S+\.\S+/.test(email);
+    const amountValid = Number(amount) > 0;
+    setIsPaystackReady(emailValid && amountValid);
+    setErrors({
+      email: email ? (emailValid ? "" : "Invalid email address") : "Email is required",
+      amount: amount ? (amountValid ? "" : "Amount must be positive") : "Amount is required",
+    });
+  }, [email, amount]);
 
   useEffect(() => {
     const ui = new TonConnectUI({ manifestUrl: `${window.location.origin}/tonconnect-manifest.json` });
@@ -98,17 +137,18 @@ const Wallet: React.FC = () => {
   };
 
   const handlePaystackPayment = async () => {
-    if (!email || !amount) return;
+    if (!validatePayment()) return;
     setLoading(true);
     setMessage("");
     try {
       const res = await fetch("https://tonwallet-rrab.onrender.com/api/paystack/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, nairaAmount: Math.round(nairaEquivalent), usdtAmount: usdtAmount }),
+        body: JSON.stringify({ email, nairaAmount: Math.round(nairaEquivalent), usdtAmount }),
       });
       const data: any = await res.json();
-      window.location.href = data.authorization_url;
+      setPaystackUrl(data.authorization_url);
+      setShowPaystackModal(true);
     } catch {
       setMessage("Paystack initialization failed");
     } finally {
@@ -139,7 +179,8 @@ const Wallet: React.FC = () => {
       </select>
 
       <label>Amount ({currency})</label>
-      <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} min="1" />
+      {errors.amount && <p style={{ color: "red", fontSize: 12 }}>{errors.amount}</p>}
 
       <div style={{ fontSize: 14, marginTop: 8 }}>
         <p>USDT Equivalent: {usdtAmount.toFixed(4)}</p>
@@ -159,12 +200,60 @@ const Wallet: React.FC = () => {
       {walletWarning && <p style={{ color: "red", fontSize: 12 }}>{walletWarning}</p>}
 
       <hr />
+      <div style={{ margin: "auto", background: "#87bcf1ff", padding: 30, borderRadius: 12 }}>
+        <label>Pay with Paystack</label>
+        <input type="email" placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        {errors.email && <p style={{ color: "red", fontSize: 12 }}>{errors.email}</p>}
 
-      <label>Email (Paystack)</label>
-      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-      <button disabled={loading} onClick={handlePaystackPayment} style={{ cursor: "pointer" }}>
-        Pay with Paystack
-      </button>
+        {isPaystackReady && (
+          <button
+            disabled={loading}
+            onClick={handlePaystackPayment}
+            style={{
+              backgroundColor: "#ADD8E6",
+              color: "black",
+              cursor: "pointer",
+              padding: "8px 16px",
+              border: "none",
+              borderRadius: 6,
+              marginTop: 10,
+              transition: "all 0.2s ease",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#00008B";
+              (e.currentTarget as HTMLButtonElement).style.color = "#fff";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#ADD8E6";
+              (e.currentTarget as HTMLButtonElement).style.color = "black";
+            }}
+          >
+            Pay
+          </button>
+        )}
+
+        {/* ===== PAYSTACK MODAL INLINE IFRAME ===== */}
+        {showPaystackModal && (
+          <div style={{
+            position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+            background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999
+          }}>
+            <div style={{ width: "100%", maxWidth: 500, height: 600, background: "#fff", borderRadius: 12, overflow: "hidden", position: "relative" }}>
+              <button
+                onClick={() => setShowPaystackModal(false)}
+                style={{ position: "absolute", top: 10, right: 10, zIndex: 10, cursor: "pointer" }}
+              >
+                Close
+              </button>
+              <iframe
+                src={paystackUrl}
+                style={{ width: "100%", height: "100%", border: "none" }}
+                title="Paystack Payment"
+              />
+            </div>
+          </div>
+        )}
+      </div>
 
       {message && <p>{message}</p>}
     </div>
