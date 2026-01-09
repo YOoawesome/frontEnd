@@ -61,13 +61,13 @@ button {
 }
 
 button:hover {
-  background-color: #46ef70; /* Tailwind blue-500 hex */
+  background-color: #0e0450; /* Tailwind blue-500 hex */
   color: white; /* optional: make text white on hover */
 }
 
 
 .primary {
-  background: #16a34a;
+  background: #035d24;
   color: white;
 }
 
