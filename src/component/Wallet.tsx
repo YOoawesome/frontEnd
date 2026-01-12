@@ -157,31 +157,33 @@ const Wallet: React.FC = () => {
       amount: Math.round(nairaEquivalent * 100),
       currency: "NGN",
       ref: `order_${Date.now()}`,
-      callback: async (resp: { reference: string }) => {
-        try {
-          await fetch("/api/paystack/verify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              reference: resp.reference,
-              email,
-              amount: nairaEquivalent,
-              wallet: walletAddress || null,
-            }),
+      // ✅ Use regular function here
+      callback: function (resp: { reference: string }) {
+        fetch("/api/paystack/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reference: resp.reference,
+            email,
+            amount: nairaEquivalent,
+            wallet: walletAddress || null,
+          }),
+        })
+          .then(() => {
+            setMessage(
+              walletAddress
+                ? "Payment successful & wallet credited!"
+                : "Payment successful. Connect wallet to receive USDT."
+            );
+            if (walletAddress) fetchBalance();
+          })
+          .catch(() => {
+            setMessage("Payment received but verification failed");
           });
-
-          setMessage(
-            walletAddress
-              ? "Payment successful & wallet credited!"
-              : "Payment successful. Connect wallet to receive USDT."
-          );
-
-          if (walletAddress) fetchBalance();
-        } catch {
-          setMessage("Payment received but verification failed");
-        }
       },
-      onClose: () => alert("Payment cancelled"),
+      onClose: function () {
+        alert("Payment cancelled");
+      },
     });
 
     handler.openIframe();
