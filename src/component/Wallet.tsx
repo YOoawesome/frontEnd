@@ -239,7 +239,7 @@ const Wallet: React.FC = () => {
                 style={{
                   marginLeft: 8,
                   fontSize: 12,
-                  padding: "2px 6px",
+                  padding: "2px 2px",
                   background: "#f87171",
                   color: "#fff",
                   borderRadius: 4,
