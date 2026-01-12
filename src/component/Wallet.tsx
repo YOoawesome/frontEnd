@@ -134,7 +134,12 @@ const Wallet: React.FC = () => {
 
   // ===== Connect TON Wallet =====
   const connectTonWallet = async () => {
+    if (connected) {
+      alert("Wallet already connected");
+      return;
+    }
     if (!tc) return;
+
     try {
       const wallet: ConnectedWallet = await (tc as any).connectWallet();
       if (wallet) {
@@ -147,12 +152,18 @@ const Wallet: React.FC = () => {
   };
 
   // ===== Disconnect TON Wallet =====
-  const disconnectTonWallet = () => {
-    setConnected(false);
-    setWalletAddress("");
-    setWalletBalance(0);
-    setWalletWarning("");
-    setMessage("");
+  const disconnectTonWallet = async () => {
+    if (!tc) return;
+    try {
+      await tc.disconnect(); // real disconnect via TON Connect UI :contentReference[oaicite:1]{index=1}
+      setConnected(false);
+      setWalletAddress("");
+      setWalletBalance(0);
+      setWalletWarning("");
+      setMessage("");
+    } catch {
+      setWalletWarning("Failed to disconnect wallet");
+    }
   };
 
   // ===== PAYSTACK INLINE =====
@@ -220,7 +231,27 @@ const Wallet: React.FC = () => {
       >
         <p>
           <strong>Wallet Address:</strong>{" "}
-          {connected ? `${walletAddress.slice(0, 5)}...` : "Not connected"}
+          {connected ? (
+            <>
+              {walletAddress.slice(0, 5)}...
+              <button
+                onClick={disconnectTonWallet}
+                style={{
+                  marginLeft: 8,
+                  fontSize: 12,
+                  padding: "2px 6px",
+                  background: "#f87171",
+                  color: "#fff",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+              >
+                x
+              </button>
+            </>
+          ) : (
+            "Not connected"
+          )}
         </p>
         <p>
           <strong>Wallet Balance:</strong>{" "}
@@ -256,17 +287,9 @@ const Wallet: React.FC = () => {
       <p>NGN Equivalent: ₦{Math.round(nairaEquivalent)}</p>
 
       {connected ? (
-        <>
-          <button onClick={payWithUsdtTon} disabled={loading}>
-            Pay with USDT (TON)
-          </button>
-          <button
-            onClick={disconnectTonWallet}
-            style={{ marginLeft: 10, background: "#f87171", color: "#fff" }}
-          >
-            Disconnect Wallet
-          </button>
-        </>
+        <button onClick={payWithUsdtTon} disabled={loading}>
+          Pay with USDT (TON)
+        </button>
       ) : (
         <button onClick={connectTonWallet}>Connect TON Wallet</button>
       )}
