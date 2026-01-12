@@ -3,16 +3,20 @@
 import React, { useEffect, useState } from "react";
 import { TonConnectUI } from "@tonconnect/ui";
 import type { ConnectedWallet } from "@tonconnect/ui";
-import { PaystackButton } from "react-paystack";
 
 /**
  * SIDE NOTES:
- * - Backend logic is USDT-only
- * - Frontend uses Paystack public key
- * - UI can show NGN or USDT
- * - Wallet balance is recorded server-side and persists after refresh
- * - Paystack payment opens modal inline, avoids fullscreen warnings
+ * - Paystack payment does NOT require wallet connection
+ * - USDT payment requires wallet connection
+ * - Wallet balance persists after refresh
+ * - Paystack opens inline modal
  */
+
+declare global {
+  interface Window {
+    PaystackPop: any;
+  }
+}
 
 const Wallet: React.FC = () => {
   const [tc, setTc] = useState<TonConnectUI | null>(null);
@@ -76,15 +80,17 @@ const Wallet: React.FC = () => {
     currency === "USDT" ? Number(amount) : Number(amount) / usdtPrice;
   const nairaEquivalent = usdtAmount * usdtPrice;
 
-  // ==== Pay with USDT via TON (backend handles Jetton payload) ====
+  // ===== USDT Payment =====
   const payWithUsdtTon = async () => {
-    if (!tc || !walletAddress || !usdtAmount) return;
+    if (!tc || !walletAddress) {
+      setWalletWarning("Connect TON wallet to pay with USDT");
+      return;
+    }
 
     setLoading(true);
     setMessage("");
 
     try {
-      // 1️⃣ Init USDT order on backend
       const res = await fetch("/api/usdt/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,21 +98,19 @@ const Wallet: React.FC = () => {
       });
       const { orderId, jettonWallet } = await res.json();
 
-      // 2️⃣ Ask TON Connect to send transaction
       await tc.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 300,
         messages: [
           {
             address: jettonWallet,
-            amount: "50000000", // gas in nanotons
-            payload: "", // actual payload built on backend
+            amount: "50000000",
+            payload: "",
           },
         ],
       });
 
       setMessage("USDT transaction sent");
 
-      // 3️⃣ Poll backend for confirmation
       const interval = setInterval(async () => {
         const r = await fetch("/api/usdt/confirm", {
           method: "POST",
@@ -128,7 +132,7 @@ const Wallet: React.FC = () => {
     }
   };
 
-  // ===== Connect Wallet =====
+  // ===== Connect TON Wallet =====
   const connectTonWallet = async () => {
     if (!tc) return;
     try {
@@ -142,27 +146,45 @@ const Wallet: React.FC = () => {
     }
   };
 
-  // ===== Paystack Config =====
-  const paystackConfig = {
-    email,
-    amount: Math.round(nairaEquivalent * 100),
-    publicKey: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY!,
-    currency: "NGN",
-    onSuccess: async (resp: any) => {
-      if (!walletAddress) return alert("Connect TON wallet first");
+  // ===== PAYSTACK INLINE =====
+  const payWithPaystack = () => {
+    if (!email) return alert("Enter email");
+    if (!window.PaystackPop) return alert("Paystack not loaded");
 
-      const res = await fetch("/api/link-wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: resp.reference, wallet: walletAddress }),
-      });
-      const data = await res.json();
-      if (data.status === "wallet_linked") {
-        alert("Payment successful & balance updated!");
-        fetchBalance();
-      }
-    },
-    onClose: () => alert("Payment cancelled"),
+    const handler = window.PaystackPop.setup({
+      key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
+      email,
+      amount: Math.round(nairaEquivalent * 100),
+      currency: "NGN",
+      ref: `order_${Date.now()}`,
+      callback: async (resp: { reference: string }) => {
+        try {
+          await fetch("/api/paystack/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              reference: resp.reference,
+              email,
+              amount: nairaEquivalent,
+              wallet: walletAddress || null,
+            }),
+          });
+
+          setMessage(
+            walletAddress
+              ? "Payment successful & wallet credited!"
+              : "Payment successful. Connect wallet to receive USDT."
+          );
+
+          if (walletAddress) fetchBalance();
+        } catch {
+          setMessage("Payment received but verification failed");
+        }
+      },
+      onClose: () => alert("Payment cancelled"),
+    });
+
+    handler.openIframe();
   };
 
   return (
@@ -201,7 +223,6 @@ const Wallet: React.FC = () => {
         type="email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        placeholder="Email for Paystack"
       />
 
       <label>Currency</label>
@@ -225,22 +246,22 @@ const Wallet: React.FC = () => {
       <p>NGN Equivalent: ₦{Math.round(nairaEquivalent)}</p>
 
       {connected ? (
-        <button
-          onClick={payWithUsdtTon}
-          disabled={loading || !connected}
-          style={{ marginTop: 10 }}
-        >
+        <button onClick={payWithUsdtTon} disabled={loading}>
           Pay with USDT (TON)
         </button>
       ) : (
-        <button onClick={connectTonWallet} style={{ marginTop: 10 }}>
-          Connect TON Wallet
-        </button>
+        <button onClick={connectTonWallet}>Connect TON Wallet</button>
       )}
 
       <hr style={{ margin: "20px 0" }} />
 
-      {email && amount && <PaystackButton {...paystackConfig} text="Pay with Paystack" />}
+      <button onClick={payWithPaystack}>Pay with Paystack</button>
+
+      {!walletAddress && (
+        <p style={{ color: "#555", fontSize: 13 }}>
+          Connect wallet later to receive USDT.
+        </p>
+      )}
 
       {message && <p>{message}</p>}
       {walletWarning && <p style={{ color: "red" }}>{walletWarning}</p>}
