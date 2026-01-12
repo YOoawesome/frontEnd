@@ -146,6 +146,15 @@ const Wallet: React.FC = () => {
     }
   };
 
+  // ===== Disconnect TON Wallet =====
+  const disconnectTonWallet = () => {
+    setConnected(false);
+    setWalletAddress("");
+    setWalletBalance(0);
+    setWalletWarning("");
+    setMessage("");
+  };
+
   // ===== PAYSTACK INLINE =====
   const payWithPaystack = () => {
     if (!email) return alert("Enter email");
@@ -157,7 +166,6 @@ const Wallet: React.FC = () => {
       amount: Math.round(nairaEquivalent * 100),
       currency: "NGN",
       ref: `order_${Date.now()}`,
-      // ✅ Use regular function here
       callback: function (resp: { reference: string }) {
         fetch("/api/paystack/verify", {
           method: "POST",
@@ -212,7 +220,7 @@ const Wallet: React.FC = () => {
       >
         <p>
           <strong>Wallet Address:</strong>{" "}
-          {connected ? walletAddress : "Not connected"}
+          {connected ? `${walletAddress.slice(0, 5)}...` : "Not connected"}
         </p>
         <p>
           <strong>Wallet Balance:</strong>{" "}
@@ -248,9 +256,17 @@ const Wallet: React.FC = () => {
       <p>NGN Equivalent: ₦{Math.round(nairaEquivalent)}</p>
 
       {connected ? (
-        <button onClick={payWithUsdtTon} disabled={loading}>
-          Pay with USDT (TON)
-        </button>
+        <>
+          <button onClick={payWithUsdtTon} disabled={loading}>
+            Pay with USDT (TON)
+          </button>
+          <button
+            onClick={disconnectTonWallet}
+            style={{ marginLeft: 10, background: "#f87171", color: "#fff" }}
+          >
+            Disconnect Wallet
+          </button>
+        </>
       ) : (
         <button onClick={connectTonWallet}>Connect TON Wallet</button>
       )}
