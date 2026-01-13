@@ -80,57 +80,71 @@ const Wallet: React.FC = () => {
     currency === "USDT" ? Number(amount) : Number(amount) / usdtPrice;
   const nairaEquivalent = usdtAmount * usdtPrice;
 
-  // ===== USDT Payment =====
+  // ===== USDT Payment (Production-ready) =====
   const payWithUsdtTon = async () => {
-    if (!tc || !walletAddress) {
-      setWalletWarning("Connect TON wallet to pay with USDT");
-      return;
-    }
+  if (!tc || !walletAddress) {
+    setWalletWarning("Connect TON wallet first");
+    return;
+  }
 
-    setLoading(true);
-    setMessage("");
+  if (!amount || Number(amount) <= 0) {
+    setWalletWarning("Enter a valid amount");
+    return;
+  }
 
-    try {
-      const res = await fetch("/api/usdt/init", {
+  setLoading(true);
+  setMessage("Opening wallet for approval...");
+
+  try {
+    // 1️⃣ Init backend
+    const res = await fetch("/api/usdt/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        wallet: walletAddress,
+        usdtAmount
+      })
+    });
+
+    const { orderId, jettonWallet, payload } = await res.json();
+
+    // 2️⃣ Send TX (THIS OPENS WALLET)
+    await tc.sendTransaction({
+      validUntil: Math.floor(Date.now() / 1000) + 300,
+      messages: [
+        {
+          address: jettonWallet,
+          amount: "1", // 🔥 ONLY GAS
+          payload // 🔥 BASE64 PAYLOAD
+        }
+      ]
+    });
+
+    setMessage("Transaction sent. Waiting for confirmation...");
+
+    // 3️⃣ Poll confirmation
+    const interval = setInterval(async () => {
+      const r = await fetch("/api/usdt/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: walletAddress, usdtAmount }),
-      });
-      const { orderId, jettonWallet } = await res.json();
-
-      await tc.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 300,
-        messages: [
-          {
-            address: jettonWallet,
-            amount: "50000000",
-            payload: "",
-          },
-        ],
+        body: JSON.stringify({ orderId })
       });
 
-      setMessage("USDT transaction sent");
+      const d = await r.json();
 
-      const interval = setInterval(async () => {
-        const r = await fetch("/api/usdt/confirm", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId }),
-        });
-        const d = await r.json();
-        if (d.status === "paid") {
-          clearInterval(interval);
-          fetchBalance();
-          setMessage("USDT payment confirmed");
-        }
-      }, 4000);
-    } catch (e) {
-      console.error(e);
-      setMessage("USDT payment failed");
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (d.status === "paid") {
+        clearInterval(interval);
+        fetchBalance();
+        setMessage("USDT payment confirmed!");
+      }
+    }, 4000);
+  } catch (e) {
+    console.error("TON transaction failed:", e);
+    setMessage("Transaction cancelled or failed");
+  } finally {
+    setLoading(false);
+  }
+};
 
   // ===== Connect TON Wallet =====
   const connectTonWallet = async () => {
@@ -155,7 +169,7 @@ const Wallet: React.FC = () => {
   const disconnectTonWallet = async () => {
     if (!tc) return;
     try {
-      await tc.disconnect(); // real disconnect via TON Connect UI :contentReference[oaicite:1]{index=1}
+      await tc.disconnect();
       setConnected(false);
       setWalletAddress("");
       setWalletBalance(0);
@@ -237,13 +251,17 @@ const Wallet: React.FC = () => {
               <button
                 onClick={disconnectTonWallet}
                 style={{
-                  marginLeft: 8,
-                  fontSize: 12,
-                  padding: "2px 2px",
+                  marginLeft: 6,
+                  fontSize: 10,
+                  padding: "0 4px",
+                  minWidth: 16,
+                  height: 16,
                   background: "#f87171",
                   color: "#fff",
                   borderRadius: 4,
                   cursor: "pointer",
+                  lineHeight: "16px",
+                  textAlign: "center",
                 }}
               >
                 x
@@ -288,7 +306,7 @@ const Wallet: React.FC = () => {
 
       {connected ? (
         <button onClick={payWithUsdtTon} disabled={loading}>
-          Pay with USDT (TON)
+          {loading ? "Awaiting wallet approval..." : "Pay with USDT (TON)"}
         </button>
       ) : (
         <button onClick={connectTonWallet}>Connect TON Wallet</button>
