@@ -82,69 +82,68 @@ const Wallet: React.FC = () => {
 
   // ===== USDT Payment (Production-ready) =====
   const payWithUsdtTon = async () => {
-  if (!tc || !walletAddress) {
-    setWalletWarning("Connect TON wallet first");
-    return;
-  }
+    if (!tc || !walletAddress) {
+      setWalletWarning("Connect TON wallet to pay with USDT");
+      return;
+    }
+    if (!amount || Number(amount) <= 0) {
+      setWalletWarning("Enter a valid amount");
+      return;
+    }
 
-  if (!amount || Number(amount) <= 0) {
-    setWalletWarning("Enter a valid amount");
-    return;
-  }
+    setLoading(true);
+    setMessage("Opening wallet for approval...");
 
-  setLoading(true);
-  setMessage("Opening wallet for approval...");
-
-  try {
-    // 1️⃣ Init backend
-    const res = await fetch("/api/usdt/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        wallet: walletAddress,
-        usdtAmount
-      })
-    });
-
-    const { orderId, jettonWallet, payload } = await res.json();
-
-    // 2️⃣ Send TX (THIS OPENS WALLET)
-    await tc.sendTransaction({
-      validUntil: Math.floor(Date.now() / 1000) + 300,
-      messages: [
-        {
-          address: jettonWallet,
-          amount: "1", // 🔥 ONLY GAS
-          payload // 🔥 BASE64 PAYLOAD
-        }
-      ]
-    });
-
-    setMessage("Transaction sent. Waiting for confirmation...");
-
-    // 3️⃣ Poll confirmation
-    const interval = setInterval(async () => {
-      const r = await fetch("/api/usdt/confirm", {
+    try {
+      // Initialize payment on backend
+      const res = await fetch("/api/usdt/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId })
+        body: JSON.stringify({ wallet: walletAddress, usdtAmount }),
       });
+     const { orderId, jettonWallet, payload } = await res.json();
 
-      const d = await r.json();
 
-      if (d.status === "paid") {
-        clearInterval(interval);
-        fetchBalance();
-        setMessage("USDT payment confirmed!");
-      }
-    }, 4000);
-  } catch (e) {
-    console.error("TON transaction failed:", e);
-    setMessage("Transaction cancelled or failed");
-  } finally {
-    setLoading(false);
-  }
-};
+      // Send transaction via TON Connect
+      await tc.sendTransaction({
+  validUntil: Math.floor(Date.now() / 1000) + 300,
+  messages: [
+    {
+      address: jettonWallet,
+      amount: (0.05 * 1e9).toString(), // 0.05 TON for gas
+      payload, // BASE64 STRING FROM BACKEND
+    },
+  ],
+});
+
+
+      setMessage("Transaction sent. Waiting for confirmation...");
+
+      // Poll backend to confirm payment
+      const interval = setInterval(async () => {
+        try {
+          const r = await fetch("/api/usdt/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ orderId }),
+          });
+          const d = await r.json();
+          if (d.status === "paid") {
+            clearInterval(interval);
+            fetchBalance();
+            setMessage("USDT payment confirmed!");
+          }
+        } catch (e) {
+          console.error("Error confirming payment:", e);
+        }
+      }, 4000);
+    } catch (e) {
+      console.error("TON transaction failed:", e);
+      setMessage("USDT payment failed or cancelled in wallet");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // ===== Connect TON Wallet =====
   const connectTonWallet = async () => {
