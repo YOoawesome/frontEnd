@@ -33,6 +33,9 @@ const Wallet: React.FC = () => {
   const [message, setMessage] = useState("");
   const [walletWarning, setWalletWarning] = useState("");
 
+
+  
+
   // ===== TON Connect Init =====
   useEffect(() => {
     const ui = new TonConnectUI({
