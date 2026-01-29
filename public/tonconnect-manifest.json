@@ -1,7 +1,7 @@
 
 {
-  "name": "TON Coin Converter",
-  "description": "Buy coins using TON and get coins in-app",
+  "name": "payment",
+  "description": "Pay for our services",
   "iconUrl": "https://terraminttoken.com/icon.png",
   "url": "https://terraminttoken.com" ,
   "manifestVersion": "1.0"
